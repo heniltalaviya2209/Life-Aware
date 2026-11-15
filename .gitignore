@@ -7,6 +7,10 @@ venv/
 # Streamlit local secrets
 .streamlit/secrets.toml
 
+# Reminder persistence and offline speech models (machine-specific / large)
+reminders.json
+models/
+
 # OS / editor
 .DS_Store
 Thumbs.db
