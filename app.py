@@ -22,6 +22,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+import reminders
+
 # ---------------------------------------------------------------------------
 # Configuration - all texts and simulated data live here (easy to change)
 # ---------------------------------------------------------------------------
@@ -336,6 +338,12 @@ if "camera_failures" not in st.session_state:
     st.session_state.camera_failures = 0   # consecutive failed frame reads
 if "camera_message" not in st.session_state:
     st.session_state.camera_message = DEFAULT_CAMERA_MESSAGE
+if "reminders" not in st.session_state:
+    st.session_state.reminders = reminders.load_reminders()
+if "reminder_audio_gen" not in st.session_state:
+    st.session_state.reminder_audio_gen = 0
+if "reminder_status" not in st.session_state:
+    st.session_state.reminder_status = None
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +652,134 @@ for start in range(0, len(FUTURE_FEATURES), 3):
                 """,
                 unsafe_allow_html=True,
             )
+
+# ---------------------------------------------------------------------------
+# F. Reminders (voice -> offline transcription -> schedule -> announcement)
+# ---------------------------------------------------------------------------
+
+
+@st.fragment(run_every="5s")
+def _check_due_reminders() -> None:
+    """Announce any pending reminder whose time has arrived, then mark it done."""
+    now = datetime.now()
+    changed = False
+    for item in st.session_state.reminders:
+        if item.get("status") != "pending":
+            continue
+        due = reminders.parse_iso(item.get("scheduled_at"))
+        if due is None or due > now:
+            continue
+        message = f"Reminder: {item['task']}"
+        # Speak through the machine's speakers. This bypasses browser autoplay
+        # policies (and pyttsx3's macOS main-thread limitation) via `say`/subprocess.
+        try:
+            reminders.speak(message)
+            st.toast(f"🔊 {message}", icon="🔊")
+        except Exception:
+            st.toast(f"⏰ Reminder due — {item['task']}", icon="⏰")
+        # Optional browser replay control (no autoplay, so no double playback).
+        try:
+            audio, mime = reminders.text_to_audio(message)
+            if audio:
+                st.audio(audio, format=mime)
+        except Exception:
+            pass
+        item["status"] = "completed"
+        changed = True
+    if changed:
+        reminders.save_reminders(st.session_state.reminders)
+
+
+st.subheader("F · Reminders")
+st.caption(
+    "Record a reminder such as “remind me to take my medicine at 4pm” or "
+    "“remind me to stretch in 30 minutes”. Speech is transcribed offline (Vosk), "
+    "the trigger time is parsed from the text (dateparser), and due reminders are "
+    "announced out loud (pyttsx3)."
+)
+
+# One-shot status message produced by the workflow below (shown after rerun).
+if st.session_state.reminder_status:
+    kind, message = st.session_state.reminder_status
+    getattr(st, kind)(message)
+    st.session_state.reminder_status = None
+
+audio_value = st.audio_input(
+    "🎙️ Record a reminder",
+    key=f"reminder_audio_{st.session_state.reminder_audio_gen}",
+)
+if audio_value is not None:
+    spoken = None
+    with st.spinner("Transcribing your reminder…"):
+        try:
+            pcm = reminders.decode_audio_to_pcm16_mono(audio_value)
+            spoken = reminders.transcribe_pcm(pcm)
+        except FileNotFoundError as exc:
+            st.session_state.reminder_status = ("error", str(exc))
+        except Exception as exc:
+            st.session_state.reminder_status = (
+                "error",
+                f"Could not transcribe the recording: {exc}",
+            )
+
+    if spoken:
+        task, scheduled = reminders.parse_reminder(spoken, now=datetime.now())
+        item = {
+            "id": reminders.new_id(),
+            "task": task or spoken,
+            "scheduled_at": reminders.to_iso(scheduled) if scheduled else None,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        st.session_state.reminders.append(item)
+        reminders.save_reminders(st.session_state.reminders)
+        if scheduled:
+            st.session_state.reminder_status = (
+                "success",
+                f"Reminder saved: “{item['task']}” — scheduled for "
+                f"{reminders.format_scheduled(item['scheduled_at'])}.",
+            )
+        else:
+            st.session_state.reminder_status = (
+                "warning",
+                f"Reminder saved: “{item['task']}” — no time detected, so it is "
+                "unscheduled (say a time such as “at 4pm” or “in 30 minutes”).",
+            )
+    elif spoken == "" and not st.session_state.reminder_status:
+        st.session_state.reminder_status = (
+            "warning",
+            "No speech was recognised in that recording — please try again, a little "
+            "closer to the microphone.",
+        )
+
+    # Bump the widget key so the same recording isn't processed again on rerun.
+    st.session_state.reminder_audio_gen += 1
+    st.rerun()
+
+if not st.session_state.reminders:
+    st.caption("No reminders yet — record one above.")
+else:
+    rows = [
+        {
+            "Task": item.get("task", ""),
+            "Scheduled": reminders.format_scheduled(item.get("scheduled_at")),
+            "Status": "✅ completed" if item.get("status") == "completed" else "⏳ pending",
+        }
+        for item in st.session_state.reminders
+    ]
+    st.dataframe(pd.DataFrame(rows), hide_index=True, height=240)
+
+    if any(item.get("status") == "completed" for item in st.session_state.reminders):
+        if st.button("🗑 Clear completed reminders"):
+            st.session_state.reminders = [
+                item
+                for item in st.session_state.reminders
+                if item.get("status") != "completed"
+            ]
+            reminders.save_reminders(st.session_state.reminders)
+            st.rerun()
+
+_check_due_reminders()
 
 # ---------------------------------------------------------------------------
 # Footer

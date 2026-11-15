@@ -1,9 +1,22 @@
 # SCENE-DETECT prototype dependencies
 # CPU only — no GPU, no cloud, no paid APIs needed.
-streamlit>=1.31,<2.0
+streamlit>=1.37,<2.0
 # Pinned below 3.x: pandas 3.x / numpy 2.5+ DLLs were blocked by the
 # Windows Code Integrity policy on this laptop (import errors).
 pandas>=2.2,<3.0
 numpy>=2.0,<2.3
 # Only needed for the optional webcam preview (the app works without it).
 opencv-python>=4.8,<5.0
+
+# --- Reminders section (voice reminders) ---
+# Offline speech-to-text. Needs a local Vosk model directory: download one from
+# https://alphacephei.com/vosk/models and unpack it to ./models/. The path is
+# configurable via the VOSK_MODEL_PATH environment variable (default:
+# models/vosk-model-small-en-us-0.15). See reminders.py.
+vosk>=0.3.44
+# Natural-language date/time parsing ("at 4pm", "in 30 minutes", "tomorrow").
+dateparser>=1.2
+# Text-to-speech for reminder announcements (writes WAV on Windows, AIFF on
+# macOS which is converted to WAV when ffmpeg is available). On macOS this
+# pulls in pyobjc automatically.
+pyttsx3>=2.90
