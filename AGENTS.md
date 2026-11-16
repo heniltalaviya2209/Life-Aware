@@ -19,9 +19,12 @@ streamlit run app.py               # http://localhost:8501
 
 ## Project structure
 
-- `app.py` — **the entire app**: config, styles, session state, camera helpers, page (sections A–F). No other source files.
+- `app.py` — the Streamlit dashboard: config, styles, session state, camera preview, page (sections A–F).
 - `reminders.py` — helper module for section F (Vosk transcription, dateparser parsing, JSON storage, pyttsx3 TTS). Heavy deps imported lazily.
-- `requirements.txt` — streamlit, pandas, numpy, opencv-python + vosk, dateparser, pyttsx3.
+- `lifeaware/` — the real (non-simulated) chain, built step by step: `schema.py` (Observation/Event contract), `config.py` + `config.yaml` (all thresholds and zones), `camera.py` (FrameSource; `app.py` reuses its `open_webcam`), `zones.py`, `objects.py` (pretrained YOLO, lazy), `memory.py` (ItemMemory), `usecases/lost_items.py` (UC2). Not wired into `app.py` yet.
+- `tools/` — `zone_setup.py` (find zone polygons), `item_demo.py` (camera → detector → memory → UC2, prints fps).
+- `tests/` — pytest with fake data only (no camera/mic/model download). Run `python -m pytest` (Windows App Control blocks `pytest.exe` on the dev laptop).
+- `requirements.txt` — streamlit, pandas, numpy, opencv-python + vosk, dateparser, pyttsx3 + pyyaml, ultralytics + pytest.
 - `docs/` — project docs (PDFs, Word, meeting transcript). Not needed to run the app.
 - `README.md` — canonical prose docs (state/scenario tables, setup, troubleshooting). Prefer it over re-deriving.
 

@@ -152,6 +152,18 @@ python -m pytest
 `pytest.exe` launcher.) The tests use fake data only — no camera, microphone or Vosk model is needed.
 The same tests run automatically on GitHub (see `.github/workflows/tests.yml`).
 
+### 6. Try the real camera → object → "where is my phone?" chain (optional)
+
+```bash
+python tools/zone_setup.py            # click to find zone corners; copy them into config.yaml
+python tools/item_demo.py --show      # webcam for 20 s: boxes, zones, then the UC2 answer + fps
+python tools/item_demo.py --source clip.mp4
+```
+
+The first run downloads the pretrained `yolo11n.pt` (~5 MB) into `models/`.
+Only the COCO class "cell phone" is detected for now; keys are not a COCO class,
+so the answer for keys is always an honest "not sure".
+
 ---
 
 ## Using the app
