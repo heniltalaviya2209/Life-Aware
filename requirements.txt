@@ -1,6 +1,6 @@
 # SCENE-DETECT prototype dependencies
 # CPU only — no GPU, no cloud, no paid APIs needed.
-streamlit>=1.37,<2.0
+streamlit>=1.40,<2.0
 # Pinned below 3.x: pandas 3.x / numpy 2.5+ DLLs were blocked by the
 # Windows Code Integrity policy on this laptop (import errors).
 pandas>=2.2,<3.0
