@@ -21,5 +21,14 @@ dateparser>=1.2
 # pulls in pyobjc automatically.
 pyttsx3>=2.90
 
+# --- LifeAware pipeline (lifeaware/ package) ---
+# Reads config.yaml.
+pyyaml>=6.0
+# Pretrained YOLO object detection (no training). Pulls in torch; for a
+# smaller CPU-only install run first:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# The model weights (models/yolo11n.pt) are downloaded on first use (gitignored).
+ultralytics>=8.3
+
 # --- Development / tests (not needed to run the app) ---
 pytest>=8.0
