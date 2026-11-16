@@ -21,7 +21,7 @@ streamlit run app.py               # http://localhost:8501
 
 - `app.py` — the Streamlit dashboard: config, styles, session state, camera preview, page (sections A–F).
 - `reminders.py` — helper module for section F (Vosk transcription, dateparser parsing, JSON storage, pyttsx3 TTS). Heavy deps imported lazily.
-- `lifeaware/` — the real (non-simulated) chain, built step by step: `schema.py` (Observation/Event contract), `config.py` + `config.yaml` (all thresholds and zones), `camera.py` (FrameSource; `app.py` reuses its `open_webcam`), `zones.py`, `objects.py` (pretrained YOLO, lazy), `memory.py` (ItemMemory), `usecases/lost_items.py` (UC2). Not wired into `app.py` yet.
+- `lifeaware/` — the real (non-simulated) chain, built step by step: `schema.py` (Observation/Event contract), `config.py` + `config.yaml` (all thresholds and zones), `camera.py` (FrameSource; `app.py` reuses its `open_webcam`), `zones.py`, `objects.py` (pretrained YOLO, lazy), `memory.py` (ItemMemory), `usecases/lost_items.py` (UC2), `item_finder.py` (UC2 Streamlit section: background worker + `render_item_finder()`, shown as `app.py` section G and standalone in `demo_items.py`). Only one section may hold the webcam: section C's start calls `stop_item_finder()`, section G stops the preview first.
 - `tools/` — `zone_setup.py` (find zone polygons), `item_demo.py` (camera → detector → memory → UC2, prints fps).
 - `tests/` — pytest with fake data only (no camera/mic/model download). Run `python -m pytest` (Windows App Control blocks `pytest.exe` on the dev laptop).
 - `requirements.txt` — streamlit, pandas, numpy, opencv-python + vosk, dateparser, pyttsx3 + pyyaml, ultralytics + pytest.
