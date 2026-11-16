@@ -23,6 +23,7 @@ import pandas as pd
 import streamlit as st
 
 import reminders
+from lifeaware.camera import open_webcam
 
 # ---------------------------------------------------------------------------
 # Configuration - all texts and simulated data live here (easy to change)
@@ -362,20 +363,6 @@ def _release_camera() -> None:
     st.session_state.camera_cap = None
 
 
-def _open_capture(cv2):
-    """Try to open the default webcam (with a Windows-friendly fallback)."""
-    for args in ((0,), (0, cv2.CAP_DSHOW)):
-        try:
-            cap = cv2.VideoCapture(*args)
-        except Exception:
-            continue
-        if cap is not None and cap.isOpened():
-            return cap
-        if cap is not None:
-            cap.release()
-    return None
-
-
 def _stop_camera(message: tuple) -> None:
     """Switch the preview off and remember a friendly message."""
     _release_camera()
@@ -405,7 +392,7 @@ def _show_camera_frame(preview_slot) -> None:
 
     cap = st.session_state.get("camera_cap")
     if cap is None:
-        cap = _open_capture(cv2)
+        cap = open_webcam()  # shared with lifeaware.camera.FrameSource
         if cap is None:
             _stop_camera(
                 (
