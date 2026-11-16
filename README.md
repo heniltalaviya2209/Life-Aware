@@ -105,8 +105,8 @@ The reminders section also needs two things that are **not** pip packages:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/heniltalaviya2209/Scene-Detection-Prototype.git
-cd Scene-Detection-Prototype
+git clone https://github.com/heniltalaviya2209/Life-Aware.git
+cd Life-Aware
 ```
 
 ### 2. Create and activate a virtual environment
@@ -141,6 +141,16 @@ streamlit run app.py
 ```
 
 Streamlit opens the dashboard in your browser at **http://localhost:8501**. To stop the app, press `Ctrl + C` in the terminal.
+
+### 5. Run the tests
+
+```bash
+python -m pytest
+```
+
+(`python -m pytest` also works where Windows Application Control blocks the
+`pytest.exe` launcher.) The tests use fake data only — no camera, microphone or Vosk model is needed.
+The same tests run automatically on GitHub (see `.github/workflows/tests.yml`).
 
 ---
 

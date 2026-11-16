@@ -20,3 +20,6 @@ dateparser>=1.2
 # macOS which is converted to WAV when ffmpeg is available). On macOS this
 # pulls in pyobjc automatically.
 pyttsx3>=2.90
+
+# --- Development / tests (not needed to run the app) ---
+pytest>=8.0
