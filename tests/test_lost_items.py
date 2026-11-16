@@ -81,3 +81,17 @@ def test_text_query_for_unknown_item_is_honest(memory):
     assert event.new_state == "unknown"
     assert "only look for your phone or your keys" in event.reason
     assert spoken == [event.reason]
+
+
+def test_answer_card_escapes_html_and_marks_found_items(memory):
+    from lifeaware.usecases.lost_items import _answer_card
+
+    from lifeaware.schema import Event
+
+    found = _answer_card(handle_query("phone", memory, now=NOW))
+    tricky = _answer_card(Event(time=NOW, use_case="UC2", old_state="checking",
+                                new_state="unknown", reason="<script>x</script>"))
+
+    assert 'class="uc2-answer solved"' in found
+    assert "on the sofa at 14:02" in found
+    assert "<script>" not in tricky and "&lt;script&gt;" in tricky

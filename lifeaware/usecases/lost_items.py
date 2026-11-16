@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import datetime
 from typing import Callable
 
 from lifeaware.memory import ItemMemory
@@ -95,31 +96,61 @@ def handle_text_query(
     return Event(time=now, use_case=USE_CASE, old_state="checking", new_state="unknown", reason=reply)
 
 
-def render_lost_items_panel(memory: ItemMemory, say: Callable[[str], None] | None = None) -> None:
-    """Streamlit panel for UC2: quick buttons, a text box and the last answer.
+# Question buttons of the panel: item label -> button text.
+QUESTION_BUTTONS = {"phone": "📱 Where is my phone?", "keys": "🔑 Where are my keys?"}
 
-    Meant to be placed in ``app.py`` by the dashboard owner, e.g.::
+_ANSWER_CSS = """
+<style>
+.uc2-answer {border-radius:14px; padding:14px 18px; margin:6px 0 14px 0;
+  background:rgba(148,163,184,.10); border:1px solid rgba(148,163,184,.35);
+  border-left:6px solid #64748b;}
+.uc2-answer.solved {border-left-color:#22c55e;}
+.uc2-answer .uc2-q {font-size:.72rem; font-weight:800; letter-spacing:.06em;
+  text-transform:uppercase; opacity:.65;}
+.uc2-answer .uc2-a {font-size:1.12rem; font-weight:600; margin:4px 0 6px 0; line-height:1.4;}
+.uc2-answer .uc2-note {font-size:.78rem; opacity:.7;}
+</style>
+"""
 
-        from lifeaware.usecases.lost_items import render_lost_items_panel
-        render_lost_items_panel(st.session_state.item_memory, say=reminders.speak)
-    """
+
+def _answer_card(event: Event) -> str:
+    """HTML card for the last UC2 answer (green edge when the item was found)."""
+    import html
+
+    asked = datetime.fromtimestamp(event.time).strftime("%H:%M:%S")
+    return (
+        f'<div class="uc2-answer {event.new_state}">'
+        f'<div class="uc2-q">Answer · asked at {asked}</div>'
+        f'<div class="uc2-a">{html.escape(event.reason)}</div>'
+        '<div class="uc2-note">Last sighting only — not a guarantee the item is still there.</div>'
+        "</div>"
+    )
+
+
+def render_lost_items_panel(
+    memory: ItemMemory,
+    say: Callable[[str], None] | None = None,
+    with_text_box: bool = False,
+) -> None:
+    """Streamlit panel for UC2: question buttons (optional text box) and the answer card."""
     import streamlit as st  # lazy import: keeps this module testable without Streamlit
 
     event = None
-    left, right, _ = st.columns([1, 1, 2])
-    if left.button("📱 Where is my phone?"):
-        event = handle_query("phone", memory, say=say)
-    if right.button("🔑 Where are my keys?"):
-        event = handle_query("keys", memory, say=say)
+    columns = st.columns(len(QUESTION_BUTTONS))
+    for column, (item, label) in zip(columns, QUESTION_BUTTONS.items()):
+        if column.button(label, key=f"uc2_ask_{item}", width="stretch"):
+            event = handle_query(item, memory, say=say)
 
-    question = st.text_input("Or type a question", placeholder="Where is my phone?")
-    if st.button("Ask") and question.strip():
-        event = handle_text_query(question, memory, say=say)
+    if with_text_box:
+        question = st.text_input("Or type a question", key="uc2_question",
+                                 placeholder="Where is my phone?")
+        if st.button("Ask", key="uc2_ask_text") and question.strip():
+            event = handle_text_query(question, memory, say=say)
 
     if event is not None:
         st.session_state["uc2_last_event"] = event
     last = st.session_state.get("uc2_last_event")
     if last is not None:
-        show = st.success if last.new_state == "solved" else st.info
-        show(last.reason)
-        st.caption("This is the last sighting, not a guarantee that the item is still there.")
+        st.markdown(_ANSWER_CSS + _answer_card(last), unsafe_allow_html=True)
+    else:
+        st.caption("Ask a question — the answer is shown here and spoken aloud.")
