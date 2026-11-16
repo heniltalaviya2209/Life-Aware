@@ -150,7 +150,21 @@ The reminders section also needs two things that are **not** pip packages:
 - **A Vosk model** (~40 MB). Download one from <https://alphacephei.com/vosk/models> and unpack it into `models/` (the app looks for `models/vosk-model-small-en-us-0.15`). Override the path with the `VOSK_MODEL_PATH` environment variable.
 - **`ffmpeg`** *(recommended)* for converting the text-to-speech output to WAV and decoding some browser audio formats. macOS: `brew install ffmpeg`. Linux: `sudo apt install ffmpeg espeak` (the `espeak` package provides the TTS voice). Windows: optional.
 
+Section G (find my phone) needs **nothing extra**: the first time you press **Start finder**, the YOLO model `yolo11m.pt` (~40 MB) is downloaded automatically into `models/` (internet needed once).
+
+**What you get after cloning** — models are never stored in git:
+
+| | After `git clone` + `pip install` | You must do |
+|---|---|---|
+| Dashboard, sections A–E | ✅ works | nothing |
+| Section F (reminders) | ⚠️ shows "Vosk model directory not found" | download the Vosk model (above) |
+| Section G (find my phone) | ✅ works | nothing — model downloads on first start |
+| Tests (`python -m pytest`) | ✅ works | nothing — no camera or model needed |
+
 ### 1. Clone the repository
+
+> [!TIP]
+> **Windows:** clone into a **short** folder such as `C:\Users\<you>\Life-Aware`, not deep inside OneDrive or Documents. PyTorch contains very long file paths, and Windows stops at 260 characters (see Troubleshooting).
 
 ```bash
 git clone https://github.com/heniltalaviya2209/Life-Aware.git
@@ -226,10 +240,10 @@ so the answer for keys is always an honest "not sure".
    - an **illustrative score** (simulated, not a real confidence value),
    - the **simulated body features** (orientation and motion),
    - the **evidence** used and **why this label was chosen**.
-3. *(Optional)* In section C, click **📷 Start camera preview** to see your webcam, and **⏹ Stop camera preview** to turn it off.
-4. Check section D to see the **history** of all demonstrations you ran. Click **🗑 Clear history** to reset it.
-5. In section F, click **🎙️ Record a reminder** and speak a phrase with a time. It appears in the reminders table, and when the time arrives the app announces it aloud and marks it ✅ completed.
-6. In section G, click **▶ Start finder** (first start takes a few seconds), hold your phone up to the camera until a red box appears, hide it, then click **📱 Where is my phone?**. Only one section can use the webcam: starting G stops the preview in C, and vice versa.
+3. *(Optional)* In section C, click **Start camera preview** to see your webcam, and **Stop camera preview** to turn it off.
+4. Check section D to see the **history** of all demonstrations you ran. Click ** Clear history** to reset it.
+5. In section F, click **Record a reminder** and speak a phrase with a time. It appears in the reminders table, and when the time arrives the app announces it aloud and marks it completed.
+6. In section G, click **Start finder** (first start takes a few seconds), hold your phone up to the camera until a red box appears, hide it, then click **📱 Where is my phone?**. Only one section can use the webcam: starting G stops the preview in C, and vice versa.
 
 The history lives in memory only. It is lost when you refresh the page or restart the app. Reminders, however, are written to `reminders.json` and persist across restarts.
 
@@ -311,6 +325,8 @@ Streamlit reloads the app automatically when you save the file.
 | Section G: no red box around the phone | Use good light and hold the phone 30–50 cm from the camera, screen or back fully visible. Wait ~1 s — only every 5th frame is checked. |
 | Section G: first start is slow | Normal: loading PyTorch and the model takes 5–10 s the first time. Later starts are quicker. |
 | `pytest.exe` is blocked ("Application Control policy") | Run `python -m pytest` instead. |
+| `pip install` fails with *"Could not install packages due to an OSError … Long Path support"* (Windows) | The project folder path is too long for PyTorch's files. Either move/clone the project to a short path (e.g. `C:\Users\<you>\Life-Aware`), delete `.venv` and install again — or enable long paths once (PowerShell as admin: `New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force`, then reboot). |
+| Section G says the model could not be downloaded | The first start needs internet to fetch `yolo11m.pt`. Alternatively copy `yolo11m.pt` from a teammate into `models/`. |
 
 ---
 
