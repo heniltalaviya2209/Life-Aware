@@ -15,3 +15,11 @@ models/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# LifeAware runtime output and media (large / personal data)
+events/
+scenarios/clips/
+*.mp4
+*.avi
+*.wav
+*.pt

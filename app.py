@@ -23,6 +23,8 @@ import pandas as pd
 import streamlit as st
 
 import reminders
+from lifeaware.camera import open_webcam
+from lifeaware.item_finder import render_item_finder, stop_item_finder
 
 # ---------------------------------------------------------------------------
 # Configuration - all texts and simulated data live here (easy to change)
@@ -205,11 +207,6 @@ FUTURE_FEATURES = [
         "Notify a caregiver or emergency contact together with the scene details.",
     ),
     (
-        "🔑",
-        "Finding lost objects",
-        "Locate everyday items such as keys, phone or glasses.",
-    ),
-    (
         "🎵",
         "Favourite music playback",
         "Play the person's preferred music on request.",
@@ -362,20 +359,6 @@ def _release_camera() -> None:
     st.session_state.camera_cap = None
 
 
-def _open_capture(cv2):
-    """Try to open the default webcam (with a Windows-friendly fallback)."""
-    for args in ((0,), (0, cv2.CAP_DSHOW)):
-        try:
-            cap = cv2.VideoCapture(*args)
-        except Exception:
-            continue
-        if cap is not None and cap.isOpened():
-            return cap
-        if cap is not None:
-            cap.release()
-    return None
-
-
 def _stop_camera(message: tuple) -> None:
     """Switch the preview off and remember a friendly message."""
     _release_camera()
@@ -405,7 +388,7 @@ def _show_camera_frame(preview_slot) -> None:
 
     cap = st.session_state.get("camera_cap")
     if cap is None:
-        cap = _open_capture(cv2)
+        cap = open_webcam()  # shared with lifeaware.camera.FrameSource
         if cap is None:
             _stop_camera(
                 (
@@ -500,7 +483,7 @@ st.markdown(
         <h1>{APP_TITLE}</h1>
         <p>{APP_DESCRIPTION}</p>
         <span class="sd-status"><span class="sd-dot"></span> Prototype running — simulation mode</span>
-        <span class="sd-status idle"><span class="sd-dot"></span> AI model: not loaded (by design)</span>
+        <span class="sd-status idle"><span class="sd-dot"></span> AI model: only in section G (item finder)</span>
     </div>
     """,
     unsafe_allow_html=True,
@@ -590,6 +573,7 @@ preview_slot = preview_col.empty()
 with button_col:
     if not st.session_state.camera_on:
         if st.button("📷 Start camera preview", type="primary"):
+            stop_item_finder()  # only one section can use the webcam (see section G)
             st.session_state.camera_on = True
             st.session_state.camera_failures = 0
             st.session_state.camera_message = ("info", "📷 Starting camera …")
@@ -782,12 +766,33 @@ else:
 _check_due_reminders()
 
 # ---------------------------------------------------------------------------
+# G. Find my phone or keys (UC2) — REAL detection, see lifeaware/item_finder.py
+# ---------------------------------------------------------------------------
+
+
+def _free_webcam_for_finder() -> None:
+    """Stop the camera preview (section C) so the item finder can use the webcam."""
+    if st.session_state.camera_on:
+        _stop_camera(("info", "📷 Preview stopped — the item finder (section G) is using the webcam."))
+
+
+st.subheader("G · Find My Phone or Keys")
+st.caption(
+    "**Real AI, running locally:** the webcam feeds a pretrained YOLO model that "
+    "recognises a phone, notes which area of the room it is in, and remembers the last "
+    "sighting. Ask, and the answer is shown and spoken. Keys cannot be detected yet, "
+    "so the honest answer for keys is “not sure”."
+)
+render_item_finder(on_start=_free_webcam_for_finder)
+
+# ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
 
 st.markdown("---")
 st.caption(
-    "SCENE-DETECT prototype · Simulated demonstrations only · No real person detection, "
+    "SCENE-DETECT prototype · Sections A–B are simulated · Section G uses a real "
+    "pretrained object detector (phone only) · No person detection, "
     "pose estimation, emotion recognition or fall detection is performed · "
     "Not a medical device and not a medical diagnosis."
 )

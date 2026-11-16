@@ -1,0 +1,33 @@
+# LifeAware configuration: all thresholds, timers and zones live here.
+# Owner: Yash. Missing keys fall back to the defaults in lifeaware/config.py.
+
+camera:
+  source: 0            # webcam index, or a path to a video file
+  max_fps: 10          # frames per second handed to the chain (at most)
+  max_failures: 15     # failed reads in a row before the camera counts as "lost"
+
+objects:
+  # Pretrained COCO model; downloaded on first use (gitignored).
+  # yolo11m (medium): nano and small did NOT recognise a phone held up to our
+  # webcam (nano said "laptop"); medium found it with 0.72. ~270 ms per check on
+  # our laptop CPU vs ~60 ms for nano, so we check fewer frames.
+  model: models/yolo11m.pt
+  every_n_frames: 5          # run detection on every 5th frame only (~2 checks/s at 10 fps)
+  min_conf: 0.4              # ignore detections below this confidence
+  image_size: 640            # inference size in pixels (frames are scaled down to this)
+  classes:                   # COCO class name -> our item label
+    cell phone: phone
+    # "keys" is not a COCO class -> no detector yet (see F1 in the brief)
+
+items:
+  min_conf: 0.4        # ItemMemory ignores sightings below this
+  sure_conf: 0.6       # below this, answers say "I think ... but I'm not sure"
+
+# Zones: polygons in PIXEL coordinates of the (unmirrored) camera image.
+# PLACEHOLDERS for a 640x480 image - set them up for our fixed camera with:
+#   python tools/zone_setup.py
+# If zones overlap, the first one listed wins.
+zones:
+  sofa:  [[20, 200], [300, 200], [300, 380], [20, 380]]
+  table: [[340, 220], [620, 220], [620, 360], [340, 360]]
+  floor: [[0, 380], [640, 380], [640, 480], [0, 480]]
