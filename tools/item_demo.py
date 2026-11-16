@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lifeaware.camera import FrameSource  # noqa: E402
 from lifeaware.config import load_config  # noqa: E402
 from lifeaware.memory import ItemMemory  # noqa: E402
-from lifeaware.objects import ObjectDetector  # noqa: E402
+from lifeaware.objects import ObjectDetector, draw_detections  # noqa: E402
 from lifeaware.usecases.lost_items import handle_query  # noqa: E402
 from lifeaware.zones import ZoneMap  # noqa: E402
 
@@ -30,12 +30,7 @@ def show(frame, zones, observations) -> bool:
     """Draw zones and boxes; return False when the user pressed q."""
     import cv2
 
-    view = zones.draw(frame)
-    for obs in observations:
-        x1, y1, x2, y2 = (int(v) for v in obs.data["bbox"])
-        cv2.rectangle(view, (x1, y1), (x2, y2), (0, 0, 255), 2)
-        text = f"{obs.label} {obs.confidence:.2f} {obs.zone or '?'}"
-        cv2.putText(view, text, (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    view = draw_detections(zones.draw(frame), observations)
     cv2.imshow("LifeAware item demo (q = quit)", view)
     return (cv2.waitKey(1) & 0xFF) != ord("q")
 
@@ -56,7 +51,7 @@ def main() -> None:
     memory = ItemMemory.from_config(config)
 
     print("Loading model ...")
-    detector._get_model()  # load before timing starts
+    detector.load()  # load before timing starts
     frames, model_calls, model_time = 0, 0, 0.0
     wall_start = time.time()
     # start_time=now: clip timestamps become "now + video time", so answers read naturally.

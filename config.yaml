@@ -7,8 +7,12 @@ camera:
   max_failures: 15     # failed reads in a row before the camera counts as "lost"
 
 objects:
-  model: models/yolo11n.pt   # pretrained COCO model; downloaded on first use (gitignored)
-  every_n_frames: 3          # run detection on every 3rd frame only
+  # Pretrained COCO model; downloaded on first use (gitignored).
+  # yolo11m (medium): nano and small did NOT recognise a phone held up to our
+  # webcam (nano said "laptop"); medium found it with 0.72. ~270 ms per check on
+  # our laptop CPU vs ~60 ms for nano, so we check fewer frames.
+  model: models/yolo11m.pt
+  every_n_frames: 5          # run detection on every 5th frame only (~2 checks/s at 10 fps)
   min_conf: 0.4              # ignore detections below this confidence
   image_size: 640            # inference size in pixels (frames are scaled down to this)
   classes:                   # COCO class name -> our item label

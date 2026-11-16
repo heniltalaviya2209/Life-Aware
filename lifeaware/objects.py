@@ -70,6 +70,16 @@ class ObjectDetector:
             zone_map=zone_map,
         )
 
+    def load(self) -> None:
+        """Load the model and run one warm-up check.
+
+        PyTorch's first prediction is much slower than the rest (about 2 s on our
+        laptop), so we pay that cost here instead of on the first real frame.
+        """
+        model = self._get_model()
+        blank = np.zeros((self.image_size, self.image_size, 3), dtype=np.uint8)
+        model.predict(blank, imgsz=self.image_size, classes=self._class_ids, verbose=False)
+
     def _get_model(self):
         """Load the model lazily and look up the COCO ids of the wanted classes."""
         if self._model is None:
@@ -117,3 +127,16 @@ class ObjectDetector:
                 )
             )
         return observations
+
+
+def draw_detections(frame: np.ndarray, observations: list[Observation]) -> np.ndarray:
+    """Return a copy of ``frame`` with a red box and "label conf zone" per detection."""
+    import cv2  # lazy import
+
+    canvas = frame.copy()
+    for obs in observations:
+        x1, y1, x2, y2 = (int(v) for v in obs.data["bbox"])
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        text = f"{obs.label} {obs.confidence:.2f} {obs.zone or '?'}"
+        cv2.putText(canvas, text, (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    return canvas
