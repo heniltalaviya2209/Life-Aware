@@ -20,6 +20,17 @@ DEFAULTS: dict = {
         "classes": {"cell phone": "phone"},
     },
     "items": {"min_conf": 0.4, "sure_conf": 0.6},
+        "pose": {
+        "model": "models/yolo11s-pose.pt",
+        "every_n_frames": 3,
+        "min_conf": 0.4,
+        "min_keypoint_conf": 0.3,
+        "image_size": 640,
+        "max_persons": 1,
+        "lying_torso_angle": 60.0,
+        "sit_knee_ratio": 0.6,
+        "lying_aspect": 1.4,
+    },
     "zones": {},
 }
 
