@@ -20,12 +20,35 @@ DEFAULTS: dict = {
         "classes": {"cell phone": "phone"},
     },
     "items": {"min_conf": 0.4, "sure_conf": 0.6},
+    "pose": {
+        "model": "models/yolo11s-pose.pt",
+        "every_n_frames": 3,
+        "min_conf": 0.4,
+        "min_keypoint_conf": 0.3,
+        "image_size": 640,
+        "max_persons": 1,
+        "lying_torso_angle": 60.0,
+        "sit_knee_ratio": 0.6,
+        "lying_aspect": 1.4,
+    },
+    "fall": {
+        "floor_zones": ["floor"],
+        "unknown_zone_counts": True,
+        "min_conf": 0.3,
+        "min_lying_s": 3.0,
+        "still_s": 10.0,
+        "still_movement": 0.15,
+        "max_gap_s": 3.0,
+        "answer_timeout_s": 15.0,
+        "cooldown_s": 60.0,
+        "microphone": True,
+    },
     "zones": {},
 }
 
 # Sections that are replaced as a whole instead of merged key by key
 # (otherwise a default zone could sneak into your own zone list).
-_REPLACE_WHOLE = {"zones", "classes"}
+_REPLACE_WHOLE = {"zones", "classes", "floor_zones"}
 
 
 def _merge(defaults: dict, overrides: dict) -> dict:

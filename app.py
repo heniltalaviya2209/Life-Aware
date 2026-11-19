@@ -24,6 +24,7 @@ import streamlit as st
 
 import reminders
 from lifeaware.camera import open_webcam
+from lifeaware.fall_panel import render_fall_check, stop_fall_check
 from lifeaware.item_finder import render_item_finder, stop_item_finder
 
 # ---------------------------------------------------------------------------
@@ -573,7 +574,8 @@ preview_slot = preview_col.empty()
 with button_col:
     if not st.session_state.camera_on:
         if st.button("📷 Start camera preview", type="primary"):
-            stop_item_finder()  # only one section can use the webcam (see section G)
+            stop_item_finder()  # only one section can use the webcam (see sections G, H)
+            stop_fall_check()
             st.session_state.camera_on = True
             st.session_state.camera_failures = 0
             st.session_state.camera_message = ("info", "📷 Starting camera …")
@@ -771,7 +773,8 @@ _check_due_reminders()
 
 
 def _free_webcam_for_finder() -> None:
-    """Stop the camera preview (section C) so the item finder can use the webcam."""
+    """Stop the camera preview (C) and the fall check (H) so the item finder can use the webcam."""
+    stop_fall_check()
     if st.session_state.camera_on:
         _stop_camera(("info", "📷 Preview stopped — the item finder (section G) is using the webcam."))
 
@@ -786,14 +789,36 @@ st.caption(
 render_item_finder(on_start=_free_webcam_for_finder)
 
 # ---------------------------------------------------------------------------
+# H. Fall check (UC3) — REAL pose detection, see lifeaware/fall_panel.py
+# ---------------------------------------------------------------------------
+
+
+def _free_webcam_for_fall_check() -> None:
+    """Stop the camera preview (C) and the item finder (G) so the fall check can use the webcam."""
+    stop_item_finder()
+    if st.session_state.camera_on:
+        _stop_camera(("info", "📷 Preview stopped — the fall check (section H) is using the webcam."))
+
+
+st.subheader("H · Fall Check")
+st.caption(
+    "**Real AI, running locally:** a pretrained YOLO pose model finds the person's body "
+    "points and decides standing / sitting / lying. If someone lies on the floor without "
+    "moving, the system asks “Are you okay?”. No answer → local alarm; a broken camera or "
+    "microphone → UNKNOWN, never an alarm. Answers come from the buttons for now "
+    "(simulated speech)."
+)
+render_fall_check(on_start=_free_webcam_for_fall_check)
+
+# ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
 
 st.markdown("---")
 st.caption(
     "SCENE-DETECT prototype · Sections A–B are simulated · Section G uses a real "
-    "pretrained object detector (phone only) · No person detection, "
-    "pose estimation, emotion recognition or fall detection is performed · "
+    "pretrained object detector (phone only) · Section H uses a real pretrained pose "
+    "model for the fall check (answers simulated) · No emotion recognition · "
     "Not a medical device and not a medical diagnosis."
 )
 

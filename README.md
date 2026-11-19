@@ -5,10 +5,10 @@ A user-interface prototype for an AI-based situation-recognition system for the 
 The long-term idea is a small home-assistant robot that watches over people at home, especially elderly people (60+). It recognises the situation in a room and gets a human helper when something looks wrong, such as a fall. This repository holds the **first prototype**. It is a Streamlit dashboard that shows the workflow and how the system would *explain* its decisions.
 
 > [!IMPORTANT]
-> **Most of this prototype does not run a real AI model.**
-> It does not detect people, poses, emotions or falls. The scene demonstrations (sections A–B) are pre-written simulations for fixed scenarios, and the camera preview (section C) only shows the video.
-> **The one exception is section G (find my phone):** it runs a real, pretrained object detector on the webcam image — locally, phone only.
-> It is not a medical device and does not give a medical diagnosis.
+> **Parts of this prototype are simulated, parts are real.**
+> The scene demonstrations (sections A–B) are pre-written simulations for fixed scenarios, and the camera preview (section C) only shows the video.
+> **Two sections run real, pretrained models locally:** section G (find my phone, object detection) and section H (fall check, pose detection). In section H the person's answers still come from buttons (simulated speech).
+> It does not recognise emotions. It is not a medical device, does not give a medical diagnosis and does not call emergency services.
 
 ---
 
@@ -19,6 +19,7 @@ The long-term idea is a small home-assistant robot that watches over people at h
 - [Demonstration scenarios](#demonstration-scenarios)
 - [Reminders (section F)](#reminders-section-f)
 - [Find my phone or keys (section G)](#find-my-phone-or-keys-section-g)
+- [Fall check (section H)](#fall-check-section-h)
 - [Getting started](#getting-started)
 - [Using the app](#using-the-app)
 - [Project structure](#project-structure)
@@ -31,7 +32,7 @@ The long-term idea is a small home-assistant robot that watches over people at h
 
 ## What the app shows
 
-The dashboard is a single page with seven sections:
+The dashboard is a single page with eight sections:
 
 | Section | What it does |
 |---|---|
@@ -42,6 +43,7 @@ The dashboard is a single page with seven sections:
 | **E · Future Features** | Planned features for later versions. None of them is implemented yet. |
 | **F · Reminders** | Record a spoken reminder, which is transcribed offline, scheduled from the words, and announced aloud when due. |
 | **G · Find My Phone or Keys** | **Real detection.** The webcam feeds a pretrained YOLO model that recognises a phone, notes its zone (sofa / table / floor) and remembers the last sighting. Ask "Where is my phone?" and the answer is shown and spoken. Keys cannot be detected yet, so their answer is an honest "not sure". |
+| **H · Fall Check** | **Real pose detection.** A pretrained YOLO pose model decides standing / sitting / lying. If someone lies on the floor without moving, the system asks *"Are you okay?"*; no answer → local alarm. A broken camera or microphone gives `UNKNOWN`, never an alarm. Answers come from buttons for now. |
 
 ## The four system states
 
@@ -119,6 +121,52 @@ Webcam ─▶ FrameSource ─▶ ObjectDetector ─▶ ZoneMap ─▶ ItemMemory
 | `item_finder.py` | The Streamlit section G itself (background worker + layout). Also shown standalone by `streamlit run demo_items.py`. |
 
 **Speed on our laptop (CPU only):** about 5–8 frames per second on screen, ~0.3–0.7 s per model check. The first start takes 5–10 seconds while the model loads. We use the medium model because the nano model mistook a phone held up to the camera for a *laptop*.
+
+## Fall check (section H)
+
+Use case **UC3**. Press **▶ Start fall check** (the webcam takes up to ~30 s to open on some Windows laptops), make sure the camera sees the **whole body**, then lie down on the floor and keep still.
+
+**What happens, step by step** (timers from `config.yaml` → `fall:`):
+
+| Situation | State | What the system does |
+|---|---|---|
+| Nothing unusual | `NORMAL` | Watches. |
+| Lying on the **floor** for ≥ 3 s | `POSSIBLE_EVENT` | Keeps watching for movement. |
+| … and hardly moving for ≥ 10 s | `CHECKING` | Asks *"Are you okay? Please say yes or no."* (spoken aloud). |
+| Answer **yes**, or the person gets up | `SOLVED` | Does not ask again for 60 s. |
+| Answer **no** or **help** | `ALARM` | Local alarm (spoken + red card) until a helper presses **Acknowledge**. |
+| No answer for 15 s, camera **and** microphone working | `ALARM` | Same as above. |
+| Camera lost, microphone off, reply not understood, or person out of view | `UNKNOWN` | Grey card: *"a helper should take a look"*. **Never an alarm.** |
+
+Normal look-alike activities do **not** lead to a question: lying on the **sofa** (or any zone that is not `floor`), lying down only briefly, sitting, or moving around on the floor (e.g. exercises). "Nothing seen" is never treated as "not moving", and a person cut off by the image edge counts as `unclear`, never as lying.
+
+**The page shows:** the live camera with zones and skeleton, what is seen right now (*"lying (floor)"*), frames per second and time per check; a colour-coded **state card** with the plain-language reason for the last change; the answer buttons ✅ **Yes** · ❌ **No** · 🆘 **Help** · ❔ **Not understood** · 🙋 **Acknowledge**; toggles 🔊 *Speak aloud* and 🎤 *Microphone works* (off → a missing answer gives `UNKNOWN`); and the **event history**, which is also appended to `events/fall_events.csv` (gitignored).
+
+> The answer buttons stand in for the speech recogniser until the audio part is connected. Results from them are **simulated answers** and must be reported as such.
+
+**How it works inside.** The camera, the pose model and the fall check run in a background thread, so the dashboard stays responsive; the page only shows the latest picture, the current state and the event history.
+
+```
+Webcam ─▶ FrameSource ─▶ PoseDetector ─▶ ZoneMap ─▶ FallCheck ─▶ state card, voice, event log
+          camera.py       pose.py         zones.py   usecases/fall_check.py   fall_panel.py
+```
+
+| Module (`lifeaware/`) | Job |
+|---|---|
+| `pose.py` | `PoseDetector`: pretrained `yolo11s-pose` (17 body points), checks every 3rd frame, decides `person_standing` / `person_sitting` / `person_lying` / `person_unclear` from the torso angle and knee height, and measures movement (body-lengths per second). The rules are plain geometry in `classify_posture()` and can be tested without a camera. |
+| `usecases/fall_check.py` | `FallCheck`: the UC3 state machine (`normal → possible_event → checking → alarm / solved / unknown`). Pure logic, no camera or model; every change is an `Event` with a reason. |
+| `fall_panel.py` | The Streamlit section H itself (background worker + layout). Also shown standalone by `streamlit run demo_fall.py`. |
+
+**Speed on our laptop (CPU only):** about 1–4 frames per second on screen, ~0.4–2 s per pose check (only every 3rd frame is checked). The first start takes a few seconds while the pose model loads, and on some Windows laptops the webcam needs up to ~30 s to open. The fall check works well at this speed, because its timers are several seconds long.
+
+**Try it in a terminal window:**
+
+```bash
+python tools/pose_demo.py --show                        # postures, zone and movement per frame + fps
+python tools/fall_demo.py --show --still 4 --timeout 8  # whole fall check; keys y/n/h/u answer, a = acknowledge
+```
+
+**Known limits.** One fixed camera: someone lying with their head towards the camera can look upright, and the whole body must be in view (a laptop webcam on a desk only sees the upper body → `unclear`). The posture thresholds are first guesses and must be tuned on our own labelled clips. The `zones` in `config.yaml` are still placeholders until they are set for the final camera position with `tools/zone_setup.py`.
 
 ---
 
@@ -199,8 +247,10 @@ pip install -r requirements.txt
 ### 4. Run the app
 
 ```bash
-streamlit run app.py
+python -m streamlit run app.py
 ```
+
+(`python -m streamlit` also works where Windows Application Control blocks the `streamlit.exe` launcher.)
 
 Streamlit opens the dashboard in your browser at **http://localhost:8501**. To stop the app, press `Ctrl + C` in the terminal.
 
@@ -230,6 +280,17 @@ to our webcam).
 Only the COCO class "cell phone" is detected for now; keys are not a COCO class,
 so the answer for keys is always an honest "not sure".
 
+### 7. Try the real camera → pose → fall check chain (optional)
+
+```bash
+python tools/pose_demo.py --show                        # standing / sitting / lying, with skeleton
+python tools/fall_demo.py --show --still 4 --timeout 8  # the whole UC3 fall check with short timers
+python -m streamlit run demo_fall.py --server.port 8503 # section H as a one-page browser demo
+```
+
+The first run downloads the pretrained `yolo11s-pose.pt` (~20 MB) into `models/`.
+Put the camera a few metres away so it sees the whole body.
+
 ---
 
 ## Using the app
@@ -244,6 +305,7 @@ so the answer for keys is always an honest "not sure".
 4. Check section D to see the **history** of all demonstrations you ran. Click ** Clear history** to reset it.
 5. In section F, click **Record a reminder** and speak a phrase with a time. It appears in the reminders table, and when the time arrives the app announces it aloud and marks it completed.
 6. In section G, click **Start finder** (first start takes a few seconds), hold your phone up to the camera until a red box appears, hide it, then click **📱 Where is my phone?**. Only one section can use the webcam: starting G stops the preview in C, and vice versa.
+7. In section H, click **▶ Start fall check**, step back so the whole body is visible, lie down on the floor and keep still. Watch the card go `POSSIBLE EVENT` → `CHECKING`; then press **✅ Yes**, or wait for `ALARM` and press **🙋 Acknowledge**. Starting H stops C and G (and starting C or G stops H).
 
 The history lives in memory only. It is lost when you refresh the page or restart the app. Reminders, however, are written to `reminders.json` and persist across restarts.
 
@@ -256,19 +318,27 @@ SCENE-DETECT/
 ├── app.py               # The Streamlit dashboard (config, styles, UI, camera preview)
 ├── reminders.py         # Reminder logic: transcription, parsing, storage, speech
 ├── demo_items.py        # Section G as a standalone page (streamlit run demo_items.py)
+├── demo_fall.py         # Section H as a standalone page (streamlit run demo_fall.py)
 ├── config.yaml          # Thresholds, model name and room zones for the real chain
-├── lifeaware/           # The real (non-simulated) chain — see section G above
+├── lifeaware/           # The real (non-simulated) chain — see sections G and H above
 │   ├── schema.py  config.py  camera.py  objects.py  zones.py  memory.py  item_finder.py
-│   └── usecases/lost_items.py      # UC2: find lost items
+│   ├── pose.py  fall_panel.py   # pose detection + section H
+│   └── usecases/
+│       ├── lost_items.py          # UC2: find lost items
+│       └── fall_check.py          # UC3: fall check state machine
 ├── tools/
 │   ├── zone_setup.py    # Click on a camera image to find zone coordinates
-│   └── item_demo.py     # Run the chain in a terminal window and print fps
+│   ├── item_demo.py     # Run the UC2 chain in a terminal window and print fps
+│   ├── pose_demo.py     # Postures from the webcam, with skeleton and fps
+│   ├── fall_demo.py     # The UC3 fall check in a window, answers from the keyboard
+│   └── speed_check.py   # Measure how long one pose check takes
 ├── tests/               # pytest tests (fake data only: no camera, mic or model download)
 ├── .github/workflows/tests.yml   # Runs the tests on GitHub for every push
 ├── pytest.ini
 ├── requirements.txt     # Python dependencies
 ├── models/              # Vosk speech model + YOLO weights (downloaded, gitignored)
 ├── reminders.json       # Saved reminders (gitignored)
+├── events/              # fall_events.csv: UC3 event log (gitignored)
 ├── docs/                # Project documentation
 │   ├── SCENE-DETECT_Project_Definition.pdf     # Project definition
 │   ├── SCENE-DETECT_Project_Definition.docx    # Same, editable Word version
@@ -286,7 +356,7 @@ SCENE-DETECT/
 | **Styles** | Custom CSS for the cards, chips and result panel, with a consistent grey / green / amber / red colour scheme. |
 | **Session state** | Keeps the history, the last result, the camera status and the reminders between Streamlit reruns. |
 | **Camera helpers** | Opens the webcam (with a Windows `CAP_DSHOW` fallback) and renders **one frame per rerun**, so the Stop button always stays responsive. If it can't open the camera, it shows a friendly error message instead of crashing. |
-| **Page** | Renders sections A to F, section G (one call: `render_item_finder()` from `lifeaware/item_finder.py`) and the footer. |
+| **Page** | Renders sections A to F, section G (one call: `render_item_finder()` from `lifeaware/item_finder.py`), section H (one call: `render_fall_check()` from `lifeaware/fall_panel.py`) and the footer. |
 
 OpenCV is imported **lazily**, only when the camera is started. If it isn't installed, everything except the camera preview still works.
 
@@ -305,6 +375,11 @@ The real chain (section G) is configured in **`config.yaml`** instead — no cod
 - **Room zones:** run `python tools/zone_setup.py`, click the corners of an area on the camera image, and copy the printed points into `zones`.
 - **Model and speed:** `objects.model` (e.g. `models/yolo11n.pt` is faster but less accurate) and `objects.every_n_frames`.
 - **How sure is "sure":** `objects.min_conf` (ignore weaker detections) and `items.sure_conf` (below this the answer says *"I'm not sure"*).
+
+The fall check (section H) is configured in `config.yaml` too:
+
+- **Pose model and rules** (`pose:`): `model` (`yolo11n-pose.pt` is faster, `yolo11m-pose.pt` more accurate), `every_n_frames`, `lying_torso_angle` (degrees from vertical that count as lying), `sit_knee_ratio`.
+- **Fall-check timers** (`fall:`): `min_lying_s`, `still_s`, `answer_timeout_s`, `cooldown_s`, `still_movement`, and `floor_zones` (which zones count as "the floor"). Set `microphone: false` when no microphone is connected — then a missing answer gives `UNKNOWN` instead of an alarm.
 
 Streamlit reloads the app automatically when you save the file.
 
@@ -326,17 +401,22 @@ Streamlit reloads the app automatically when you save the file.
 | Section G: first start is slow | Normal: loading PyTorch and the model takes 5–10 s the first time. Later starts are quicker. |
 | `pytest.exe` is blocked ("Application Control policy") | Run `python -m pytest` instead. |
 | `pip install` fails with *"Could not install packages due to an OSError … Long Path support"* (Windows) | The project folder path is too long for PyTorch's files. Either move/clone the project to a short path (e.g. `C:\Users\<you>\Life-Aware`), delete `.venv` and install again — or enable long paths once (PowerShell as admin: `New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force`, then reboot). |
+| `streamlit.exe` is blocked ("Application Control policy") | Run `python -m streamlit run app.py` instead. |
+| Section H: always *"unclear"* | The camera only sees part of the body (e.g. sitting at a laptop). Move the camera a few metres away so it sees head to knees at least. |
+| Section H: lying on the floor never leads to a question | Check what the caption says under the picture: the zone must be `floor` (or no zone). The `zones` in `config.yaml` are placeholders — set them with `tools/zone_setup.py`. |
+| Section H: *"Opening the camera …"* for ~30 s | Normal on some Windows laptops. If it takes longer than 40 s, another program or section holds the webcam. |
+| Section H: first start is slow | Normal: loading PyTorch and the pose model takes a few seconds, and the webcam can take up to ~30 s to open on Windows. Only one section can use the webcam: stop sections C and G and close other camera programs. |
 | Section G says the model could not be downloaded | The first start needs internet to fetch `yolo11m.pt`. Alternatively copy `yolo11m.pt` from a teammate into `models/`. |
 
 ---
 
 ## Roadmap
 
-Planned for later versions. **None of this is implemented yet.**
+Planned for later versions. Items marked ✅ have a first working version.
 
-- 🧍 **Real-time human pose detection.** Estimate body key points (shoulders, hips, knees, ankles) and classify standing, sitting, walking, bending and lying.
-- 🧎 **Fall and inactivity detection.** Watch movement across several frames and only raise an alert when strong evidence persists.
-- 🔊 **Voice interaction.** Ask the person *"Are you okay?"* and listen for an answer before escalating.
+- ✅ **Real-time human pose detection** (section H). Standing, sitting and lying from 17 body points. Still to do: walking and bending, and tuning the thresholds on labelled clips.
+- ✅ **Fall and inactivity detection** (section H). Lying on the floor and still across several frames → question → alarm. Still to do: evaluation (correct / missed / false alarms, reaction time) on test scenarios.
+- 🔊 **Voice interaction.** The question *"Are you okay?"* is already spoken; listening for the answer with offline speech recognition is the next step (answers come from buttons for now).
 - 📞 **Human assistance alerts.** Notify a caregiver or emergency contact with the scene details.
 - 🔑 **Finding keys and glasses.** The phone finder already works (section G); keys and glasses are not in the standard model's classes and need an open-vocabulary detector.
 - 🎵 **Favourite music playback.** Play the person's preferred music on request.
@@ -356,4 +436,4 @@ The target platform is a small home robot that streams camera data to a laptop, 
 
 ---
 
-*SCENE-DETECT prototype. A university project at OTH Amberg-Weiden. Simulated scene demonstrations; real phone detection in section G.*
+*SCENE-DETECT prototype. A university project at OTH Amberg-Weiden. Simulated scene demonstrations; real phone detection in section G; real pose detection and fall check in section H (answers simulated).*
