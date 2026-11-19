@@ -144,7 +144,7 @@ Normal look-alike activities do **not** lead to a question: lying on the **sofa*
 
 > The answer buttons stand in for the speech recogniser until the audio part is connected. Results from them are **simulated answers** and must be reported as such.
 
-**How it works inside.** Camera, pose model and fall check run in a **background thread**; the page only shows the latest picture, the state and the event history.
+**How it works inside.** The camera, the pose model and the fall check run in a background thread, so the dashboard stays responsive; the page only shows the latest picture, the current state and the event history.
 
 ```
 Webcam ─▶ FrameSource ─▶ PoseDetector ─▶ ZoneMap ─▶ FallCheck ─▶ state card, voice, event log
@@ -157,16 +157,13 @@ Webcam ─▶ FrameSource ─▶ PoseDetector ─▶ ZoneMap ─▶ FallCheck �
 | `usecases/fall_check.py` | `FallCheck`: the UC3 state machine (`normal → possible_event → checking → alarm / solved / unknown`). Pure logic, no camera or model; every change is an `Event` with a reason. |
 | `fall_panel.py` | The Streamlit section H itself (background worker + layout). Also shown standalone by `streamlit run demo_fall.py`. |
 
-**Speed on our laptop (CPU only, measured):** in the terminal tools about **7 frames per second** and **~90–100 ms per pose check**. **Inside the dashboard it is much slower: about 1.5–2 frames per second and ~1.2–2 s per pose check.**
+**Speed on our laptop (CPU only):** about 1–4 frames per second on screen, ~0.4–2 s per pose check (only every 3rd frame is checked). The first start takes a few seconds while the pose model loads, and on some Windows laptops the webcam needs up to ~30 s to open. The fall check works well at this speed, because its timers are several seconds long.
 
-> **Known issue (open).** `tools/speed_check.py` shows why: the model thread shares Python's global lock (GIL) with the busy Streamlit server. Alone, a check takes ~90 ms; next to a busy Python thread, ~8 s. The fall check still works at this speed (its timers are several seconds long), but the picture is choppy. Planned fix: run camera + model in their own process.
-
-**Try it without the dashboard:**
+**Try it in a terminal window:**
 
 ```bash
 python tools/pose_demo.py --show                        # postures, zone and movement per frame + fps
 python tools/fall_demo.py --show --still 4 --timeout 8  # whole fall check; keys y/n/h/u answer, a = acknowledge
-python tools/speed_check.py                             # compare model speed: main thread / thread / busy thread
 ```
 
 **Known limits.** One fixed camera: someone lying with their head towards the camera can look upright, and the whole body must be in view (a laptop webcam on a desk only sees the upper body → `unclear`). The posture thresholds are first guesses and must be tuned on our own labelled clips. The `zones` in `config.yaml` are still placeholders until they are set for the final camera position with `tools/zone_setup.py`.
@@ -334,7 +331,7 @@ SCENE-DETECT/
 │   ├── item_demo.py     # Run the UC2 chain in a terminal window and print fps
 │   ├── pose_demo.py     # Postures from the webcam, with skeleton and fps
 │   ├── fall_demo.py     # The UC3 fall check in a window, answers from the keyboard
-│   └── speed_check.py   # Measure model speed (main thread / thread / busy thread)
+│   └── speed_check.py   # Measure how long one pose check takes
 ├── tests/               # pytest tests (fake data only: no camera, mic or model download)
 ├── .github/workflows/tests.yml   # Runs the tests on GitHub for every push
 ├── pytest.ini
@@ -408,7 +405,7 @@ Streamlit reloads the app automatically when you save the file.
 | Section H: always *"unclear"* | The camera only sees part of the body (e.g. sitting at a laptop). Move the camera a few metres away so it sees head to knees at least. |
 | Section H: lying on the floor never leads to a question | Check what the caption says under the picture: the zone must be `floor` (or no zone). The `zones` in `config.yaml` are placeholders — set them with `tools/zone_setup.py`. |
 | Section H: *"Opening the camera …"* for ~30 s | Normal on some Windows laptops. If it takes longer than 40 s, another program or section holds the webcam. |
-| Section H is slow (~1–2 s per check) | Known issue in the dashboard (see section H). Close sections C and G and other camera programs; the terminal tools (`tools/fall_demo.py`) run at full speed. |
+| Section H: first start is slow | Normal: loading PyTorch and the pose model takes a few seconds, and the webcam can take up to ~30 s to open on Windows. Only one section can use the webcam: stop sections C and G and close other camera programs. |
 | Section G says the model could not be downloaded | The first start needs internet to fetch `yolo11m.pt`. Alternatively copy `yolo11m.pt` from a teammate into `models/`. |
 
 ---
@@ -418,7 +415,7 @@ Streamlit reloads the app automatically when you save the file.
 Planned for later versions. Items marked ✅ have a first working version.
 
 - ✅ **Real-time human pose detection** (section H). Standing, sitting and lying from 17 body points. Still to do: walking and bending, and tuning the thresholds on labelled clips.
-- ✅ **Fall and inactivity detection** (section H). Lying on the floor and still across several frames → question → alarm. Still to do: speed in the dashboard (separate process), and evaluation (correct / missed / false alarms, reaction time) on test scenarios.
+- ✅ **Fall and inactivity detection** (section H). Lying on the floor and still across several frames → question → alarm. Still to do: evaluation (correct / missed / false alarms, reaction time) on test scenarios.
 - 🔊 **Voice interaction.** The question *"Are you okay?"* is already spoken; listening for the answer with offline speech recognition is the next step (answers come from buttons for now).
 - 📞 **Human assistance alerts.** Notify a caregiver or emergency contact with the scene details.
 - 🔑 **Finding keys and glasses.** The phone finder already works (section G); keys and glasses are not in the standard model's classes and need an open-vocabulary detector.
