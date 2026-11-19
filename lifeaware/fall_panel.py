@@ -4,8 +4,7 @@ One reusable section, shown in two places:
 - ``app.py`` section H (the main dashboard),
 - ``demo_fall.py`` (a standalone page, handy for testing and the mid-term demo).
 
-Camera and pose model run in their OWN PROCESS (``lifeaware/vision_worker.py``),
-so the web page can never slow the model down. The page shows the latest
+A background thread runs the real chain at <= 10 fps. The page shows the latest
 picture, the current UC3 state with its reason, answer buttons and the event list.
 
 The answer buttons stand in for the speech recogniser until the audio part is
@@ -27,13 +26,15 @@ from typing import Callable
 
 import streamlit as st
 
+from lifeaware.camera import FrameSource
 from lifeaware.config import load_config
+from lifeaware.pose import PoseDetector, draw_poses
 from lifeaware.schema import Event, Observation
 from lifeaware.usecases import fall_check as fc
 from lifeaware.usecases.fall_check import FallCheck
+from lifeaware.zones import ZoneMap
 
 EVENT_LOG = os.path.join("events", "fall_events.csv")
-
 
 # state -> (title shown on the card, css class, short explanation)
 STATE_INFO = {
@@ -82,79 +83,43 @@ def append_event_log(events: list[Event], path: str = EVENT_LOG) -> None:
 
 
 class FallWorker:
-    """Runs camera + pose in a separate process and FallCheck here.
+    """Runs camera -> pose -> FallCheck in a background thread.
 
-    The vision process (``lifeaware.vision_worker.run_vision``) sends finished
-    pictures and pose results; a small reader thread in this process feeds them
-    to ``check``. All access to ``check`` goes through ``lock`` (the page thread
-    presses buttons while the reader thread feeds results).
-
-    ``use_process=False`` runs the same vision loop in a thread instead (tests
-    use it with a fake model, because a new process would not see the fake).
+    All access to ``check`` goes through ``lock`` (the page thread presses
+    buttons while this thread feeds frames).
     """
 
-    def __init__(self, config: dict, source, check: FallCheck, log_path: str | None = EVENT_LOG,
-                 use_process: bool = True) -> None:
+    def __init__(self, config: dict, source, check: FallCheck, log_path: str | None = EVENT_LOG) -> None:
         self.config = config
         self.source = source
         self.check = check
         self.log_path = log_path
-        self.use_process = use_process
-        self.every_n_frames = max(1, int(config["pose"]["every_n_frames"]))
-        self.model_name = os.path.basename(config["pose"]["model"])
+        self.zones = ZoneMap(config["zones"])
+        self.detector = PoseDetector.from_config(config, zone_map=self.zones)
         self.lock = threading.Lock()
-        self.latest_view: bytes | None = None  # JPEG with zones and skeleton, for the page
+        self.latest_view = None  # JPEG bytes of the picture with zones and skeleton, for the page
         self.latest_pose: list[Observation] = []
         self.status = "starting"
-        self.started_at = time.time()
         self.fps = 0.0
         self.check_ms = 0.0
         self.error: str | None = None
+        self.started_at = time.time()
         self._frame_times = deque(maxlen=20)
         self._check_times = deque(maxlen=5)
-        self._vision = None  # Process or Thread running run_vision
-        self._stop = None
-        self._queue = None
-        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> "FallWorker":
-        from lifeaware.vision_worker import run_vision
-
-        self.started_at = time.time()
-        if self.use_process:
-            import multiprocessing
-
-            ctx = multiprocessing.get_context("spawn")  # same behaviour on Windows, macOS, Linux
-            self._queue, self._stop = ctx.Queue(maxsize=30), ctx.Event()
-            self._vision = ctx.Process(target=run_vision, daemon=True,
-                                       args=(self.config, self.source, self._queue, self._stop))
-        else:
-            import queue
-
-            self._queue, self._stop = queue.Queue(maxsize=30), threading.Event()
-            self._vision = threading.Thread(target=run_vision, daemon=True,
-                                            args=(self.config, self.source, self._queue, self._stop))
-        if self.use_process:
-            _start_without_main(self._vision)
-        else:
-            self._vision.start()
-        self._reader.start()
+        self._thread.start()
         return self
 
     def stop(self) -> None:
-        if self._stop is not None:
-            self._stop.set()
-        self._reader.join(timeout=5)
-        if self._vision is not None:
-            self._vision.join(timeout=5)
-            if self.use_process and self._vision.is_alive():
-                self._vision.terminate()  # last resort; frees the webcam
-        if self.status not in ("lost", "ended", "error"):
-            self.status = "stopped"
+        self._stop.set()
+        self._thread.join(timeout=3)
 
     @property
     def running(self) -> bool:
-        return self._reader.is_alive()
+        return self._thread.is_alive()
 
     # ---------------------------------------------------------------- inputs
 
@@ -181,81 +146,62 @@ class FallWorker:
         with self.lock:
             return self._record(self.check.acknowledge(time.time(), who="helper"))
 
-    # ------------------------------------------------------------ reader loop
+    # ------------------------------------------------------------------ loop
 
-    def _read_loop(self) -> None:
-        """Take messages from the vision loop and feed them to the fall check."""
-        import queue
+    def _run(self) -> None:
+        try:
+            self.status = "loading model"
+            self.detector.load()
+            self.status = "opening camera"
+            self._loop()
+        except Exception as exc:  # show the problem on the page instead of dying silently
+            self.error = f"{type(exc).__name__}: {exc}"
+            self.status = "error"
 
-        while True:
-            try:
-                message = self._queue.get(timeout=0.5)
-            except queue.Empty:
-                with self.lock:
-                    self._record(self.check.tick(time.time()))
-                if not self._vision.is_alive():
-                    if self.status not in ("lost", "ended", "stopped", "error"):
-                        self.error = self.error or "The camera/pose process stopped unexpectedly."
-                        self.status = "error"
-                    return
-                continue
-            if not self._handle(message):
-                return
-
-    def _handle(self, message: tuple) -> bool:
-        """Apply one message; return False when the vision loop is finished."""
-        kind = message[0]
-        if kind == "status":
-            self.status = message[1]
-        elif kind == "camera":
-            with self.lock:
-                self._record(self.check.feed(message[1]))
-        elif kind == "tick":
-            with self.lock:
-                self._record(self.check.tick(message[1]))
-        elif kind == "frame":
-            _, timestamp, jpeg, result, inference = message
-            now = time.time()
-            self._frame_times.append(now)
-            span = self._frame_times[-1] - self._frame_times[0]
-            with self.lock:
+    def _loop(self) -> None:
+        camera = self.config["camera"]
+        with FrameSource(self.source, max_fps=camera["max_fps"],
+                         max_failures=camera["max_failures"], start_time=time.time()) as cam:
+            while not self._stop.is_set() and cam.status == "ok":
+                frame, timestamp = cam.read()
+                self._feed_camera_status(cam)
+                if frame is None:
+                    with self.lock:
+                        self._record(self.check.tick(timestamp))
+                    continue
+                if cam.is_file:
+                    self._stop.wait(max(0.0, timestamp - time.time()))  # play clips at real speed
+                result = self.detector.detect(frame, timestamp)
                 if result is not None:
                     self.latest_pose = result
-                    self._check_times.append(inference or 0.0)
-                    self.check_ms = 1000 * sum(self._check_times) / len(self._check_times)
-                if jpeg is not None:
-                    self.latest_view = jpeg
-                self.fps = (len(self._frame_times) - 1) / span if span > 0 else 0.0
-                self.status = "ok"
-                self._record(self.check.feed_pose(result, timestamp))
-        elif kind == "end":
-            self.status = message[1]
-            return False
-        elif kind == "error":
-            self.error = message[1]
-            self.status = "error"
-            return False
-        return True
+                    self._check_times.append(self.detector.last_inference_s or 0.0)
+                with self.lock:
+                    self._record(self.check.feed_pose(result, timestamp))
+                self._publish(frame)
+            self._feed_camera_status(cam)
+            self.status = cam.status if cam.status != "ok" else "stopped"
 
+    def _feed_camera_status(self, cam: FrameSource) -> None:
+        for obs in cam.pop_observations():  # camera_lost -> UC3 "unknown"
+            with self.lock:
+                self._record(self.check.feed(obs))
 
-def _start_without_main(process) -> None:
-    """Start a "spawn" process WITHOUT it re-running the main script first.
+    def _publish(self, frame) -> None:
+        import cv2  # lazy import
 
-    A new process normally imports the parent's ``__main__`` first. Inside
-    Streamlit that is ``app.py``, so the camera process would run the whole
-    dashboard again in the background (hundreds of "missing ScriptRunContext"
-    warnings, slow start, reminders spoken twice). ``run_vision`` does not need
-    anything from ``__main__``, so we hide it for the moment the process starts.
-    """
-    import sys
-    import types
-
-    real_main = sys.modules["__main__"]
-    sys.modules["__main__"] = types.ModuleType("__main__")
-    try:
-        process.start()
-    finally:
-        sys.modules["__main__"] = real_main
+        view = draw_poses(self.zones.draw(frame), self.latest_pose)
+        # Encode once here (small JPEG) instead of sending a raw picture 4x per second:
+        # much less work for the page and no broken images while it refreshes.
+        ok, jpeg = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        self._frame_times.append(time.time())
+        span = self._frame_times[-1] - self._frame_times[0]
+        with self.lock:
+            if ok:
+                self.latest_view = jpeg.tobytes()
+            self.fps = (len(self._frame_times) - 1) / span if span > 0 else 0.0
+            if self._check_times:
+                self.check_ms = 1000 * sum(self._check_times) / len(self._check_times)
+            self.status = "ok"
 
 
 # ------------------------------------------------------------- worker control
@@ -329,7 +275,7 @@ def _status_pill(worker) -> str:
     return f'<span class="fc-pill"><span class="fc-dot"></span>{html.escape(worker.status.capitalize())} …</span>'
 
 
-@st.fragment(run_every=0.5)
+@st.fragment(run_every=0.25)
 def _live_view() -> None:
     worker = st.session_state.get("fall_worker")
     st.markdown(_status_pill(worker), unsafe_allow_html=True)
@@ -357,18 +303,17 @@ def _live_view() -> None:
     if view is not None:
         # The picture goes straight into the page (base64), not through Streamlit's
         # temporary media files: those are often deleted before the browser loads
-        # them when the view refreshes every half second, which shows a broken image.
+        # them when the view refreshes 4x per second, which shows a broken image.
         picture = base64.b64encode(view).decode("ascii")
         st.markdown(f'<img src="data:image/jpeg;base64,{picture}" '
                     'style="width:100%; border-radius:8px;" alt="camera view">',
                     unsafe_allow_html=True)
         posture = ", ".join(f"{o.label.replace('person_', '')} ({o.zone or 'no zone'})"
                             for o in worker.latest_pose) or "nobody"
-        n = worker.every_n_frames
+        n = worker.detector.every_n_frames
         every = "every frame" if n == 1 else f"every {_ordinal(n)} frame"
-        mode = "own process" if worker.use_process else "thread"
         st.caption(f"Seen: {posture} · {fps:.1f} frames/s · pose check "
-                   f"{worker.check_ms:.0f} ms, {every} · {worker.model_name} in {mode}")
+                   f"{worker.check_ms:.0f} ms, {every}")
 
 
 def _ordinal(n: int) -> str:

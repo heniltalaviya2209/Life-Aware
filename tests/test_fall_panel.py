@@ -2,7 +2,6 @@
 
 import copy
 import csv
-import os
 import time
 
 import numpy as np
@@ -55,8 +54,7 @@ def test_worker_runs_the_whole_chain_to_an_alarm(tmp_path, monkeypatch):
     config = make_config()
     log = tmp_path / "events.csv"
 
-    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=str(log),
-                        use_process=False).start()
+    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=str(log)).start()
     wait_until(lambda: not worker.running)
 
     assert worker.error is None
@@ -73,8 +71,7 @@ def test_answer_yes_from_the_page_solves(tmp_path, monkeypatch):
     clip = write_test_video(tmp_path / "clip.avi", seconds=3, fps=30)
     config = make_config(answer_timeout_s=30)
 
-    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=None,
-                        use_process=False).start()
+    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=None).start()
     wait_until(lambda: worker.check.state == "checking")
     events = worker.answer("answer_yes")
     worker.stop()
@@ -87,8 +84,7 @@ def test_microphone_off_gives_unknown_instead_of_alarm(tmp_path, monkeypatch):
     fake_lying_model(monkeypatch)
     clip = write_test_video(tmp_path / "clip.avi", seconds=3, fps=30)
     config = make_config()
-    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=None,
-                        use_process=False)
+    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=None)
     worker.set_microphone(False)
     worker.start()
     wait_until(lambda: not worker.running)
@@ -101,8 +97,7 @@ def test_acknowledge_after_alarm(tmp_path, monkeypatch):
     fake_lying_model(monkeypatch)
     clip = write_test_video(tmp_path / "clip.avi", seconds=3, fps=30)
     config = make_config()
-    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=None,
-                        use_process=False).start()
+    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=None).start()
     wait_until(lambda: worker.check.state == "alarm")
     worker.stop()
 
@@ -114,7 +109,7 @@ def test_missing_video_gives_unknown_not_alarm(tmp_path, monkeypatch):
     fake_lying_model(monkeypatch)
     config = make_config()
     worker = FallWorker(config, str(tmp_path / "missing.mp4"), FallCheck.from_config(config),
-                        log_path=None, use_process=False).start()
+                        log_path=None).start()
     wait_until(lambda: not worker.running)
 
     assert worker.status == "lost"
@@ -127,8 +122,7 @@ def test_model_errors_are_shown(monkeypatch):
 
     monkeypatch.setattr(pose, "load_model", broken_loader)
     config = make_config()
-    worker = FallWorker(config, 0, FallCheck.from_config(config), log_path=None,
-                        use_process=False).start()
+    worker = FallWorker(config, 0, FallCheck.from_config(config), log_path=None).start()
     wait_until(lambda: not worker.running)
 
     assert worker.status == "error"
@@ -173,55 +167,13 @@ def test_ordinal():
 
 
 
-def test_the_separate_process_reports_errors_back_to_the_page():
-    # A zone with only 2 points fails before any model is loaded, so this test
-    # checks the real process plumbing (spawn, queue, error message) quickly.
-    config = make_config()
-    config["zones"] = {"broken": [[0, 0], [10, 10]]}
-    worker = FallWorker(config, 0, FallCheck.from_config(config), log_path=None,
-                        use_process=True).start()
-    wait_until(lambda: not worker.running, timeout=60)
-
-    assert worker.status == "error"
-    assert "at least 3 points" in worker.error
-    assert worker.check.state == "normal"  # a broken camera side never raises an alarm
-
-
 def test_stop_ends_the_worker(tmp_path, monkeypatch):
     fake_lying_model(monkeypatch)
     clip = write_test_video(tmp_path / "clip.avi", seconds=3, fps=30)
     config = make_config()
-    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=None,
-                        use_process=False).start()
+    worker = FallWorker(config, str(clip), FallCheck.from_config(config), log_path=None).start()
     time.sleep(0.3)
     worker.stop()
     assert not worker.running
     assert worker.status == "stopped"
 
-
-def test_the_camera_process_does_not_rerun_the_main_script(tmp_path):
-    import subprocess
-    import sys
-    import textwrap
-
-    # A "main script" that leaves a marker file whenever it is executed.
-    marker = tmp_path / "main_ran.txt"
-    script = tmp_path / "fake_app.py"
-    script.write_text(textwrap.dedent(f"""
-        import multiprocessing, os, sys
-        sys.path.insert(0, {os.getcwd()!r})
-        with open({str(marker)!r}, "a") as fh:
-            fh.write("x")
-        from lifeaware.fall_panel import _start_without_main
-        if __name__ == "__main__":
-            ctx = multiprocessing.get_context("spawn")
-            p = ctx.Process(target=print, args=("child ok",))
-            _start_without_main(p)
-            p.join(30)
-            sys.exit(p.exitcode)
-    """), encoding="utf-8")
-
-    result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=60)
-
-    assert result.returncode == 0, result.stderr
-    assert marker.read_text() == "x"  # only the parent ran the script, not the child
