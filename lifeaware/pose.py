@@ -104,6 +104,8 @@ def classify_posture(
     sit_knee_ratio: float = 0.6,
     lying_aspect: float = 1.4,
     min_torso_px: float = 8.0,
+    frame_size: tuple[int, int] | None = None,
+    edge_margin: float = 5.0,
 ) -> PostureResult:
     """Decide the posture of ONE person from keypoints and bounding box.
 
@@ -119,8 +121,12 @@ def classify_posture(
        Knees not visible -> unclear (a table or the frame edge hides the legs).
     3. No usable torso: a very wide box (width / height >= ``lying_aspect``)
        counts as lying with weak evidence; anything else is unclear.
+       If ``frame_size`` (width, height) is given and the box touches the image
+       edge, the person is cut off (e.g. sitting close to a laptop webcam), so
+       the box shape means nothing -> unclear, never lying.
     """
-    features: dict = {"torso_angle": None, "knee_ratio": None, "bbox_aspect": None, "keypoints_used": 0}
+    features: dict = {"torso_angle": None, "knee_ratio": None, "bbox_aspect": None,
+                      "keypoints_used": 0, "cut_off": False}
 
     points = np.asarray(keypoints, dtype=float)
     if points.ndim != 2 or points.shape[0] < NUM_KEYPOINTS or points.shape[1] < 3:
@@ -130,6 +136,10 @@ def classify_posture(
     width, height = x2 - x1, y2 - y1
     aspect = width / height if height > 0 else None
     features["bbox_aspect"] = aspect
+    if frame_size is not None:
+        frame_w, frame_h = frame_size
+        features["cut_off"] = (x1 <= edge_margin or y1 <= edge_margin
+                               or x2 >= frame_w - edge_margin or y2 >= frame_h - edge_margin)
 
     shoulders = _midpoint(points, L_SHOULDER, R_SHOULDER, min_keypoint_conf)
     hips = _midpoint(points, L_HIP, R_HIP, min_keypoint_conf)
@@ -141,7 +151,7 @@ def classify_posture(
 
     if torso_len < min_torso_px:
         # No usable torso: fall back to the shape of the box.
-        if aspect is not None and aspect >= lying_aspect:
+        if aspect is not None and aspect >= lying_aspect and not features["cut_off"]:
             return PostureResult(LABEL_LYING, ASPECT_ONLY_CONFIDENCE, features)
         return PostureResult(LABEL_UNCLEAR, UNCLEAR_CONFIDENCE, features)
 
@@ -246,9 +256,11 @@ class PoseDetector:
         start = time.perf_counter()
         results = model.predict(frame, conf=self.min_conf, imgsz=self.image_size, verbose=False)
         self.last_inference_s = time.perf_counter() - start
-        return self._to_observations(results[0], timestamp)
+        frame_size = (frame.shape[1], frame.shape[0]) if hasattr(frame, "shape") else None
+        return self._to_observations(results[0], timestamp, frame_size)
 
-    def _to_observations(self, result, timestamp: float) -> list[Observation]:
+    def _to_observations(self, result, timestamp: float,
+                         frame_size: tuple[int, int] | None = None) -> list[Observation]:
         """Convert one YOLO pose result into Observations (largest person first)."""
         boxes, keypoints = result.boxes, result.keypoints
         people = []
@@ -273,6 +285,7 @@ class PoseDetector:
                 lying_torso_angle=self.lying_torso_angle,
                 sit_knee_ratio=self.sit_knee_ratio,
                 lying_aspect=self.lying_aspect,
+                frame_size=frame_size,
             )
             centre = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
             diagonal = math.hypot(box[2] - box[0], box[3] - box[1])

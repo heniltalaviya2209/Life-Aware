@@ -22,6 +22,7 @@ objects:
 items:
   min_conf: 0.4        # ItemMemory ignores sightings below this
   sure_conf: 0.6       # below this, answers say "I think ... but I'm not sure"
+
 pose:
   # Pretrained YOLO pose model (17 body points); downloaded on first use (gitignored).
   # s = small. If it is too slow for ~10 fps on our laptop try yolo11n-pose.pt,
@@ -36,8 +37,21 @@ pose:
   lying_torso_angle: 60      # torso at least this many degrees from vertical -> lying
   sit_knee_ratio: 0.6        # knees below hips by < 0.6 x torso length -> sitting
   lying_aspect: 1.4          # no usable torso: box width/height >= this -> lying (weak)
-# Zones: polygons in PIXEL coordinates of the (unmirrored) camera image.
 
+fall:
+  # UC3 fall check (see lifeaware/usecases/fall_check.py). Times in seconds.
+  floor_zones: [floor]       # lying in these zones is suspicious; sofa / bed are fine
+  unknown_zone_counts: true  # lying outside every zone counts as "on the floor"
+  min_conf: 0.3              # ignore pose observations below this
+  min_lying_s: 3             # lying on the floor this long -> possible_event
+  still_s: 10                # ... and hardly moving this long -> ask "Are you okay?"
+  still_movement: 0.15       # movement (body-diagonals per second) at or below this = still
+  max_gap_s: 3               # person not seen this long during possible_event -> unknown
+  answer_timeout_s: 15       # no answer within this time -> alarm (only if mic works)
+  cooldown_s: 60             # after "yes, I'm okay": do not ask again for this long
+  microphone: true           # false -> a missing answer gives "unknown", never an alarm
+
+# Zones: polygons in PIXEL coordinates of the (unmirrored) camera image.
 # PLACEHOLDERS for a 640x480 image - set them up for our fixed camera with:
 #   python tools/zone_setup.py
 # If zones overlap, the first one listed wins.

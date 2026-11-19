@@ -115,6 +115,28 @@ def test_no_torso_wide_box_is_lying_with_weak_evidence():
     assert result.confidence == pytest.approx(pose.ASPECT_ONLY_CONFIDENCE)
 
 
+def test_no_torso_wide_box_cut_off_by_the_image_edge_is_unclear():
+    # Sitting close to a laptop webcam: only head and shoulders, box runs off the bottom.
+    nothing = np.zeros((17, 3))
+    result = classify_posture(nothing, [85, 148, 640, 480], frame_size=(640, 480))
+    assert result.label == LABEL_UNCLEAR
+    assert result.features["cut_off"] is True
+
+
+def test_wide_box_inside_the_image_is_still_lying():
+    nothing = np.zeros((17, 3))
+    result = classify_posture(nothing, [100, 380, 500, 460], frame_size=(640, 480))
+    assert result.label == LABEL_LYING
+    assert result.features["cut_off"] is False
+
+
+def test_detector_passes_the_frame_size(fake_model):
+    close_up = [85, 148, 640, 480]  # wide, touches the right and bottom edge of FRAME
+    fake_model.people = [(close_up, 0.9, np.zeros((17, 3)))]
+    [obs] = PoseDetector(every_n_frames=1).detect(FRAME, 1.0)
+    assert obs.label == LABEL_UNCLEAR
+
+
 def test_no_torso_tall_box_is_unclear():
     nothing = np.zeros((17, 3))
     assert classify_posture(nothing, [280, 100, 360, 460]).label == LABEL_UNCLEAR
